@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">YT Ad Skip</string>
+    <string name="accessibility_service_description">Automatically taps the Skip Ad button in YouTube.</string>
+    <string name="status_enabled">Service status: Enabled</string>
+    <string name="status_disabled">Service status: Disabled</string>
+    <string name="button_enable">Enable Service</string>
+    <string name="button_manage">Manage in Settings</string>
+    <string name="hint_text">Tap the button, then enable this app under Accessibility settings.</string>
+</resources>

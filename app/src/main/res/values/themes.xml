@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.AdSkip" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#1A73E8</item>
+        <item name="colorPrimaryDark">#0B57BE</item>
+        <item name="colorAccent">#1A73E8</item>
+    </style>
+</resources>
