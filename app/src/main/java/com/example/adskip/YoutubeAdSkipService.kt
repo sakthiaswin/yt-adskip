@@ -2,6 +2,8 @@ package com.example.adskip
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -16,13 +18,24 @@ class YoutubeAdSkipService : AccessibilityService() {
     companion object {
         private const val TAG = "AdSkipService"
         private const val YOUTUBE_PKG = "com.google.android.youtube"
+        private const val POLL_INTERVAL_MS = 300L
 
         // Fallback text patterns since resource IDs get renamed/obfuscated
         // by YouTube across app updates. Case-insensitive substring match.
         // Add new patterns here if YouTube changes button wording.
         private val SKIP_TEXT_PATTERNS = listOf(
-            "skip ad", "skip ads", "skip advertisement"
+            "skip ad", "skip ads", "skip advertisement", "skip"
         )
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var polling = false
+
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            tryClickSkip()
+            if (polling) handler.postDelayed(this, POLL_INTERVAL_MS)
+        }
     }
 
     override fun onServiceConnected() {
@@ -33,15 +46,33 @@ class YoutubeAdSkipService : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             packageNames = arrayOf(YOUTUBE_PKG)
             flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            notificationTimeout = 100 // ms, keep low for responsiveness
+            notificationTimeout = 50 // ms, keep low for responsiveness
         }
         serviceInfo = info
         Log.d(TAG, "Service connected, watching $YOUTUBE_PKG")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.packageName != YOUTUBE_PKG) return
+        if (event.packageName != YOUTUBE_PKG) {
+            stopPolling()
+            return
+        }
+        startPolling()
+        tryClickSkip()
+    }
 
+    private fun startPolling() {
+        if (polling) return
+        polling = true
+        handler.post(pollRunnable)
+    }
+
+    private fun stopPolling() {
+        polling = false
+        handler.removeCallbacks(pollRunnable)
+    }
+
+    private fun tryClickSkip() {
         val root = rootInActiveWindow ?: return
         val skipNode = findSkipButton(root)
         skipNode?.let {
@@ -55,6 +86,8 @@ class YoutubeAdSkipService : AccessibilityService() {
     /**
      * Recursively search the node tree for a clickable skip-ad control.
      * Matches on text, content-description, or view-id substring "skip".
+     * Also checks the node's parent for clickability, since some skip
+     * buttons are icon-only children inside a clickable container.
      */
     private fun findSkipButton(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
@@ -63,12 +96,27 @@ class YoutubeAdSkipService : AccessibilityService() {
         val desc = node.contentDescription?.toString()?.lowercase()
         val viewId = node.viewIdResourceName?.lowercase()
 
-        val matches = SKIP_TEXT_PATTERNS.any { pattern ->
+        val textMatches = SKIP_TEXT_PATTERNS.any { pattern ->
             text?.contains(pattern) == true || desc?.contains(pattern) == true
         } || viewId?.contains("skip") == true
 
-        if (matches && node.isClickable) {
-            return AccessibilityNodeInfo.obtain(node)
+        if (textMatches) {
+            if (node.isClickable) {
+                return AccessibilityNodeInfo.obtain(node)
+            }
+            // Walk up to find the nearest clickable ancestor (icon-only buttons
+            // are often a non-clickable text/icon inside a clickable parent).
+            var parent = node.parent
+            var depth = 0
+            while (parent != null && depth < 4) {
+                if (parent.isClickable) {
+                    return AccessibilityNodeInfo.obtain(parent)
+                }
+                val next = parent.parent
+                parent.recycle()
+                parent = next
+                depth++
+            }
         }
 
         for (i in 0 until node.childCount) {
@@ -85,5 +133,10 @@ class YoutubeAdSkipService : AccessibilityService() {
 
     override fun onInterrupt() {
         Log.d(TAG, "Service interrupted")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopPolling()
     }
 }
