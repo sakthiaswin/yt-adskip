@@ -36,6 +36,14 @@
         android:visibility="gone"
         android:text="@string/button_debug_overlay_off" />
 
+    <Switch
+        android:id="@+id/overlayToggleSwitch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:visibility="gone"
+        android:text="@string/switch_overlay_toggle" />
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

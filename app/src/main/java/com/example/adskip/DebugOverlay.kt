@@ -15,5 +15,15 @@ package com.example.adskip
 interface DebugOverlay {
     fun show()
     fun hide()
+
+    /** Single persistent line pinned at top — current state at a glance. */
+    fun status(line: String)
+
+    /**
+     * Scrolling event trail. Consecutive identical messages are collapsed
+     * into one line with a "(xN)" counter instead of spamming a new line
+     * per poll — keeps a real match visible instead of buried under
+     * hundreds of repeated "nothing this poll" lines.
+     */
     fun log(message: String)
 }

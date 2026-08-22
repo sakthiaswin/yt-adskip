@@ -18,5 +18,6 @@ object DebugOverlayFactory {
 private object NoOpDebugOverlay : DebugOverlay {
     override fun show() {}
     override fun hide() {}
+    override fun status(line: String) {}
     override fun log(message: String) {}
 }
