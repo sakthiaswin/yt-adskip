@@ -158,7 +158,26 @@ class YoutubeAdSkipService : AccessibilityService() {
     private fun startPolling() {
         if (polling) return
         polling = true
+        logBatteryExemptionStatus()
         handler.post(pollRunnable)
+    }
+
+    /**
+     * One-shot diagnostic per YouTube-foreground session: reports whether
+     * this app is actually exempted from battery/background restrictions
+     * right now. Distinct from whether the user has ever tapped "Fix
+     * Background Restrictions" in MainActivity — Samsung devices can
+     * silently drop that exemption (or never apply it if Auto Blocker /
+     * Restricted Settings intervened), so this checks live state instead
+     * of assuming the earlier tap stuck.
+     */
+    private fun logBatteryExemptionStatus() {
+        val pm = getSystemService(POWER_SERVICE) as? android.os.PowerManager
+        val exempt = pm?.isIgnoringBatteryOptimizations(packageName) ?: false
+        dbgLog("battery-exempt=$exempt")
+        if (!exempt) {
+            dbgLog("^ NOT exempt: OS is likely starving window-content IPC. See MainActivity 'Fix Background Restrictions'.")
+        }
     }
 
     private fun stopPolling() {
