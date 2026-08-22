@@ -6,4 +6,7 @@
     <string name="button_enable">Enable Service</string>
     <string name="button_manage">Manage in Settings</string>
     <string name="hint_text">Tap the button, then enable this app under Accessibility settings.</string>
+    <string name="button_debug_overlay_off">Enable Debug Overlay</string>
+    <string name="button_debug_overlay_on">Debug Overlay: Granted</string>
+    <string name="toast_debug_overlay_granted">Overlay permission already granted — open YouTube to see live debug info.</string>
 </resources>

@@ -28,6 +28,14 @@
         android:layout_height="wrap_content"
         android:text="@string/button_enable" />
 
+    <Button
+        android:id="@+id/debugOverlayButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:visibility="gone"
+        android:text="@string/button_debug_overlay_off" />
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
