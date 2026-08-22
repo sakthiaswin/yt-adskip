@@ -1,8 +1,12 @@
 package com.example.adskip
 
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.View
@@ -17,6 +21,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var enableButton: Button
+    private lateinit var batteryOptimizeButton: Button
     private lateinit var debugOverlayButton: Button
     private lateinit var overlayToggleSwitch: Switch
 
@@ -26,12 +31,15 @@ class MainActivity : AppCompatActivity() {
 
         statusText = findViewById(R.id.statusText)
         enableButton = findViewById(R.id.enableButton)
+        batteryOptimizeButton = findViewById(R.id.batteryOptimizeButton)
         debugOverlayButton = findViewById(R.id.debugOverlayButton)
         overlayToggleSwitch = findViewById(R.id.overlayToggleSwitch)
 
         enableButton.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+
+        batteryOptimizeButton.setOnClickListener { requestBatteryExemptionIfNeeded() }
 
         // Only present in debug builds — release variant of DebugOverlayFactory
         // reports isDebugBuild=false and never requests SYSTEM_ALERT_WINDOW.
@@ -59,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+        updateBatteryOptimizeButton()
         updateDebugOverlayButton()
     }
 
@@ -84,6 +93,46 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.button_debug_overlay_off)
         }
+    }
+
+    /**
+     * On several OEM skins (Samsung One UI in particular — see the header
+     * comment in YoutubeAdSkipService.kt) an app that isn't exempted from
+     * battery/background restrictions can have its window-content IPC
+     * calls silently starved while backgrounded: the accessibility service
+     * stays bound and keeps receiving events, but rootInActiveWindow() and
+     * getWindows() return nothing for as long as the restriction applies.
+     * This is exactly the "root: unavailable" symptom the debug overlay
+     * reports. Requesting this exemption is the actual fix for that case.
+     */
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun updateBatteryOptimizeButton() {
+        val exempted = isIgnoringBatteryOptimizations()
+        batteryOptimizeButton.text = if (exempted) {
+            getString(R.string.button_battery_optimize_on)
+        } else {
+            getString(R.string.button_battery_optimize_off)
+        }
+        batteryOptimizeButton.isEnabled = !exempted
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryExemptionIfNeeded() {
+        if (isIgnoringBatteryOptimizations()) {
+            updateBatteryOptimizeButton()
+            return
+        }
+        startActivity(
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")
+            )
+        )
     }
 
     private fun requestOverlayPermissionIfNeeded() {

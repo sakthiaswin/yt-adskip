@@ -29,6 +29,26 @@ import android.view.accessibility.AccessibilityNodeInfo
  *   alone silently misses ads on some OEM builds. Path 1 is the actual
  *   fix for that; path 2 stays as a safety net.
  *
+ *   Follow-up field logs showed path 1 can ALSO fail — event.source
+ *   itself null on every event, for the whole ad, on the same class of
+ *   device. When BOTH paths go empty simultaneously and stay empty for
+ *   seconds at a time (rather than a single missed poll), that's not a
+ *   node-matching problem, it's the OS declining to hand over window
+ *   content at all — most commonly because the app hasn't been
+ *   exempted from battery/background restrictions (Samsung One UI is
+ *   the most aggressive about this). The service stays bound and keeps
+ *   getting events either way, which is why this looks like "events
+ *   fire but nothing is ever found" instead of the service dying.
+ *   MainActivity has a "Fix Background Restrictions" button that sends
+ *   the user to grant that exemption — that's the real fix for this
+ *   failure mode. Two smaller mitigations here help too:
+ *     - FLAG_INCLUDE_NOT_IMPORTANT_VIEWS, so a skip button an OEM build
+ *       marked "not important for accessibility" isn't pruned from the
+ *       tree even when a window root IS retrievable.
+ *     - One short-delay retry in tryClickSkipFallback() before it gives
+ *       up for that cycle, in case of a transient window-info cache lag
+ *       rather than a sustained restriction.
+ *
  * Debug visualization: when running a debug build with overlay permission
  * granted and the in-app "Show Debug Overlay" toggle on (MainActivity), a
  * semi-transparent, non-interactive overlay appears whenever YouTube is
@@ -42,6 +62,7 @@ class YoutubeAdSkipService : AccessibilityService() {
         private const val TAG = "AdSkipService"
         private const val YOUTUBE_PKG = "com.google.android.youtube"
         private const val POLL_INTERVAL_MS = 300L
+        private const val EMPTY_ROOT_RETRY_DELAY_MS = 80L
 
         // Fallback text patterns since resource IDs get renamed/obfuscated
         // by YouTube across app updates. Case-insensitive substring match.
@@ -53,6 +74,11 @@ class YoutubeAdSkipService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var polling = false
+    private var emptyRootRetryPending = false
+    private val emptyRootRetryRunnable = Runnable {
+        emptyRootRetryPending = false
+        tryClickSkipFallback(isRetry = true)
+    }
 
     private val debugOverlay: DebugOverlay by lazy { DebugOverlayFactory.create(applicationContext) }
 
@@ -71,7 +97,8 @@ class YoutubeAdSkipService : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             packageNames = arrayOf(YOUTUBE_PKG)
             flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                    AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                    AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
             notificationTimeout = 50 // ms, keep low for responsiveness
         }
         serviceInfo = info
@@ -137,14 +164,22 @@ class YoutubeAdSkipService : AccessibilityService() {
     private fun stopPolling() {
         polling = false
         handler.removeCallbacks(pollRunnable)
+        handler.removeCallbacks(emptyRootRetryRunnable)
+        emptyRootRetryPending = false
     }
 
     /**
      * Fallback path used by the poll loop and when an event carries no
      * usable source. Scans rootInActiveWindow plus any other interactive
      * windows reported by the OS.
+     *
+     * [isRetry] distinguishes the original attempt from the one-shot
+     * delayed re-check below, so a persistent blackout (the background-
+     * restriction case — see class header) can't cause retries to stack:
+     * at most one extra attempt runs per empty result, not one per poll
+     * tick during the whole outage.
      */
-    private fun tryClickSkipFallback() {
+    private fun tryClickSkipFallback(isRetry: Boolean = false) {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         rootInActiveWindow?.let { roots.add(it) }
         try {
@@ -155,7 +190,11 @@ class YoutubeAdSkipService : AccessibilityService() {
 
         if (roots.isEmpty()) {
             dbgStatus("root: unavailable (rootInActiveWindow + windows both empty)")
-            dbgLog("fallback scan: nothing available this poll")
+            dbgLog("fallback scan: nothing available this poll" + if (isRetry) " (retry)" else "")
+            if (!isRetry && !emptyRootRetryPending) {
+                emptyRootRetryPending = true
+                handler.postDelayed(emptyRootRetryRunnable, EMPTY_ROOT_RETRY_DELAY_MS)
+            }
             return
         }
 
