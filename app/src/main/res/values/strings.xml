@@ -9,4 +9,7 @@
     <string name="button_debug_overlay_off">Enable Debug Overlay</string>
     <string name="button_debug_overlay_on">Debug Overlay: Granted</string>
     <string name="toast_debug_overlay_granted">Overlay permission already granted — open YouTube to see live debug info.</string>
+    <string name="switch_overlay_toggle">Show Debug Overlay</string>
+    <string name="toast_overlay_started">Debug overlay ON — will show next time YouTube opens.</string>
+    <string name="toast_overlay_stopped">Debug overlay OFF.</string>
 </resources>

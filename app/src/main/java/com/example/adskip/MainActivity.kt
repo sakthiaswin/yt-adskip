@@ -7,6 +7,8 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.view.View
 import android.widget.Button
+import android.widget.CompoundButton
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -16,6 +18,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var enableButton: Button
     private lateinit var debugOverlayButton: Button
+    private lateinit var overlayToggleSwitch: Switch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +27,7 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         enableButton = findViewById(R.id.enableButton)
         debugOverlayButton = findViewById(R.id.debugOverlayButton)
+        overlayToggleSwitch = findViewById(R.id.overlayToggleSwitch)
 
         enableButton.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -34,8 +38,21 @@ class MainActivity : AppCompatActivity() {
         if (DebugOverlayFactory.isDebugBuild) {
             debugOverlayButton.visibility = View.VISIBLE
             debugOverlayButton.setOnClickListener { requestOverlayPermissionIfNeeded() }
+
+            overlayToggleSwitch.visibility = View.VISIBLE
+            overlayToggleSwitch.isChecked = DebugPrefs.isOverlayEnabled(this)
+            overlayToggleSwitch.setOnCheckedChangeListener { _: CompoundButton, checked: Boolean ->
+                DebugPrefs.setOverlayEnabled(this, checked)
+                Toast.makeText(
+                    this,
+                    if (checked) getString(R.string.toast_overlay_started)
+                    else getString(R.string.toast_overlay_stopped),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         } else {
             debugOverlayButton.visibility = View.GONE
+            overlayToggleSwitch.visibility = View.GONE
         }
     }
 
