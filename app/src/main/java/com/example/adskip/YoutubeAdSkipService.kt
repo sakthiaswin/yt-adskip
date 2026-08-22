@@ -2,6 +2,9 @@ package com.example.adskip
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -12,6 +15,13 @@ import android.view.accessibility.AccessibilityNodeInfo
  * This is the file you update when YouTube changes its UI and skip
  * detection stops working. Everything relevant lives in this one file:
  * SKIP_TEXT_PATTERNS below, and the matching logic in findSkipButton().
+ *
+ * Debug visualization: when running a debug build with overlay permission
+ * granted (MainActivity -> "Enable Debug Overlay"), a semi-transparent,
+ * non-interactive overlay appears whenever YouTube is foregrounded,
+ * showing live events, node matches, and click results. Release builds
+ * compile this out entirely (see DebugOverlayFactory in
+ * app/src/release/java/...).
  */
 class YoutubeAdSkipService : AccessibilityService() {
 
@@ -30,6 +40,8 @@ class YoutubeAdSkipService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var polling = false
+
+    private val debugOverlay: DebugOverlay by lazy { DebugOverlayFactory.create(applicationContext) }
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -55,8 +67,11 @@ class YoutubeAdSkipService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.packageName != YOUTUBE_PKG) {
             stopPolling()
+            debugOverlay.hide()
             return
         }
+        debugOverlay.show()
+        debugOverlay.log("EVT ${AccessibilityEvent.eventTypeToString(event.eventType)}")
         startPolling()
         tryClickSkip()
     }
@@ -72,15 +87,83 @@ class YoutubeAdSkipService : AccessibilityService() {
         handler.removeCallbacks(pollRunnable)
     }
 
-    private fun tryClickSkip() {
-        val root = rootInActiveWindow ?: return
-        val skipNode = findSkipButton(root)
-        skipNode?.let {
-            val clicked = it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.d(TAG, "Skip button clicked=$clicked")
-            it.recycle()
+    /**
+     * Scans rootInActiveWindow first, then any OTHER interactive windows
+     * reported by the OS (requires FLAG_RETRIEVE_INTERACTIVE_WINDOWS,
+     * already set in onServiceConnected). This matters because some ad
+     * surfaces / overlays render in a secondary window rather than the
+     * "active" one — rootInActiveWindow alone misses those, which is a
+     * likely cause of "service running but nothing happens".
+     */
+    private fun collectRootsToScan(): List<AccessibilityNodeInfo> {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        rootInActiveWindow?.let { roots.add(it) }
+        try {
+            windows?.forEach { w ->
+                if (!w.isActive) {
+                    w.root?.let { roots.add(it) }
+                }
+            }
+        } catch (e: Exception) {
+            debugOverlay.log("windows scan failed: ${e.message}")
         }
-        root.recycle()
+        return roots
+    }
+
+    private fun tryClickSkip() {
+        val roots = collectRootsToScan()
+        if (roots.isEmpty()) {
+            debugOverlay.log("no windows/root available this poll")
+            return
+        }
+
+        var handled = false
+        for (root in roots) {
+            val skipNode = findSkipButton(root)
+            if (skipNode != null) {
+                debugOverlay.log(
+                    "MATCH text=\"${skipNode.text}\" desc=\"${skipNode.contentDescription}\" " +
+                        "clickable=${skipNode.isClickable} enabled=${skipNode.isEnabled}"
+                )
+                if (skipNode.isEnabled) {
+                    handled = clickNode(skipNode)
+                } else {
+                    debugOverlay.log("node disabled (likely still in countdown), skipping this poll")
+                }
+                skipNode.recycle()
+            }
+            root.recycle()
+            if (handled) break
+        }
+        if (!handled && roots.isNotEmpty()) {
+            debugOverlay.log("no matching skip node this poll (scanned ${roots.size} window(s))")
+        }
+    }
+
+    /**
+     * Try the normal accessibility click first. If the node reports
+     * itself clickable/enabled but performAction() returns false (or
+     * silently does nothing — some Compose-rendered buttons don't
+     * respond correctly to ACTION_CLICK), fall back to dispatching a
+     * real synthetic tap gesture at the node's on-screen center.
+     */
+    private fun clickNode(node: AccessibilityNodeInfo): Boolean {
+        val viaAction = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        debugOverlay.log("performAction(ACTION_CLICK) result=$viaAction")
+        if (viaAction) return true
+
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        if (bounds.isEmpty) {
+            debugOverlay.log("gesture fallback skipped: empty bounds")
+            return false
+        }
+        val path = Path().apply { moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat()) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        val dispatched = dispatchGesture(gesture, null, null)
+        debugOverlay.log("gesture fallback at (${bounds.centerX()},${bounds.centerY()}) dispatched=$dispatched")
+        return dispatched
     }
 
     /**
@@ -138,5 +221,6 @@ class YoutubeAdSkipService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         stopPolling()
+        debugOverlay.hide()
     }
 }
